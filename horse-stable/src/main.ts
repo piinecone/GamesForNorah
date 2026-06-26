@@ -2,11 +2,20 @@ import Phaser from 'phaser';
 import { RanchScene } from './RanchScene';
 import './styles.css';
 
+function viewportSize(): { width: number; height: number } {
+  return {
+    width: window.visualViewport?.width ?? window.innerWidth,
+    height: window.visualViewport?.height ?? window.innerHeight,
+  };
+}
+
+const initial = viewportSize();
+
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'game',
-  width: window.innerWidth,
-  height: window.innerHeight,
+  width: initial.width,
+  height: initial.height,
   backgroundColor: '#87ceeb',
   pixelArt: true,
   roundPixels: true,

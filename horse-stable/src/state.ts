@@ -725,12 +725,14 @@ export function clamp(value: number, min: number, max: number): number {
 }
 
 export function getWorldBounds(): { width: number; height: number } {
-  return { width: WORLD_SIZE.width + LAND_PAD_X * 2, height: WORLD_SIZE.height + LAND_PAD_BOTTOM };
+  return { width: WORLD_SIZE.width, height: WORLD_SIZE.height };
 }
 
+/** Zoom to fill the world viewport (cover), avoiding letterbox bars on tall/narrow panels. */
 export function getWorldFitZoom(viewportW: number, viewportH: number): number {
   const bounds = getWorldBounds();
-  return Math.min(viewportW / bounds.width, viewportH / bounds.height, 1);
+  const cover = Math.max(viewportW / bounds.width, viewportH / bounds.height);
+  return Math.min(cover, 1);
 }
 
 export interface SidebarLayout {
@@ -786,7 +788,7 @@ export function getSidebarLayout(
 
 export function getSidebarWidth(screenWidth: number, screenHeight?: number): number {
   if (screenHeight !== undefined && screenHeight > screenWidth) {
-    return clamp(Math.floor(screenWidth * 0.3), 240, 300);
+    return clamp(Math.floor(screenWidth * 0.28), 220, 280);
   }
-  return clamp(Math.floor(screenWidth * 0.34), 280, 360);
+  return clamp(Math.floor(screenWidth * 0.3), 260, 320);
 }

@@ -188,7 +188,6 @@ export class RanchScene extends Phaser.Scene {
 
     this.scale.on('resize', this.handleResize, this);
     this.handleResize();
-    this.fitWorldCamera();
   }
 
   update(time: number, delta: number): void {
@@ -1900,7 +1899,7 @@ export class RanchScene extends Phaser.Scene {
     this.worldZoom = getWorldFitZoom(worldW, height);
     const cam = this.cameras.main;
     cam.setZoom(this.worldZoom);
-    cam.centerOn(WORLD_SIZE.width / 2, WORLD_SIZE.height / 2);
+    cam.centerOn(PADDOCK.x + PADDOCK.width / 2, PADDOCK.y + PADDOCK.height / 2 - 40);
   }
 
   private handleResize(): void {
