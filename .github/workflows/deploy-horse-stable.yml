@@ -1,4 +1,4 @@
-name: Deploy horse-stable to Pages
+name: Deploy GamesForNorah to Pages
 
 on:
   push:
@@ -17,9 +17,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: horse-stable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,11 +24,19 @@ jobs:
           node-version: '20'
           cache: npm
           cache-dependency-path: horse-stable/package-lock.json
-      - run: npm ci
-      - run: npm run build
+      - name: Build horse-stable
+        working-directory: horse-stable
+        env:
+          VITE_BASE: /GamesForNorah/horse-stable/
+        run: npm ci && npm run build
+      - name: Assemble site
+        run: |
+          mkdir -p _site/horse-stable
+          cp -r horse-stable/dist/* _site/horse-stable/
+          cp index.html _site/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: horse-stable/dist
+          path: _site
 
   deploy:
     needs: build

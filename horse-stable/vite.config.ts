@@ -48,7 +48,7 @@ function musicStaticPlugin(): Plugin {
 }
 
 export default defineConfig({
-  base: './',
+  base: process.env.VITE_BASE || './',
   plugins: [musicStaticPlugin()],
   server: {
     host: '0.0.0.0',
