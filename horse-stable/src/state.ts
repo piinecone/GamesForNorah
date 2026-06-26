@@ -23,7 +23,7 @@ export const LAND_PAD_X = 360;
 export const LAND_PAD_BOTTOM = 320;
 export const NEED_KEY_COUNT = 4;
 export const PADDOCK = { x: 170, y: 350, width: 980, height: 520 };
-export const LESSON_QUEUE = { x: 52, y: 620, count: 4 };
+export const LESSON_QUEUE = { x: 88, y: 490, count: 4 };
 
 export const GROWTH_MS = 120_000;
 export const ADULT_LIFE_MS = 600_000;
@@ -40,7 +40,7 @@ const ALERT_THRESHOLD = 34;
 const CRITICAL_THRESHOLD = 20;
 const BREED_CARE_MIN = 50;
 
-const horseNames = ['Izar', 'Luna', 'Mendi', 'Kora', 'Nube', 'Lore', 'Sol', 'Haize', 'Mila', 'Argi'];
+const horseNames = ['Izar', 'Luna', 'Mendi', 'Norah', 'Enea', 'Ada', 'Amaia', 'Nube', 'Sol', 'Haize'];
 const colors: HorseColor[] = ['chestnut', 'bay', 'palomino', 'gray', 'black', 'paint'];
 
 export function getDayProgress(state: GameState): number {
@@ -138,6 +138,16 @@ export function canRemoveHorse(state: GameState, horse: Horse): boolean {
 export function getLessonsLeft(horse: Horse): number {
   if (horse.ageStage !== 'adult') return 0;
   return Math.max(0, LESSONS_PER_ADULT_PER_DAY - horse.lessonsToday);
+}
+
+export function shouldShowKidsQueue(state: GameState): boolean {
+  if (isNight(state)) return false;
+  for (const horse of state.horses) {
+    if (horse.ageStage !== 'adult') continue;
+    if ((horse.lessonRemainingMs ?? 0) > 0) return true;
+    if (!horse.isSleeping && getLessonsLeft(horse) > 0) return true;
+  }
+  return false;
 }
 
 export function getGrowthProgress(horse: Horse): number {
@@ -724,15 +734,23 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-export function getWorldBounds(): { width: number; height: number } {
-  return { width: WORLD_SIZE.width, height: WORLD_SIZE.height };
+export function getWorldBounds(): { width: number; height: number; centerX: number; centerY: number } {
+  const minX = 20;
+  const maxX = WORLD_SIZE.width - 20;
+  const minY = 80;
+  const maxY = WORLD_SIZE.height - 40;
+  return {
+    width: maxX - minX,
+    height: maxY - minY,
+    centerX: (minX + maxX) / 2,
+    centerY: (minY + maxY) / 2,
+  };
 }
 
-/** Zoom to fill the world viewport (cover), avoiding letterbox bars on tall/narrow panels. */
+/** Contain zoom so the full ranch is visible without cropping. */
 export function getWorldFitZoom(viewportW: number, viewportH: number): number {
   const bounds = getWorldBounds();
-  const cover = Math.max(viewportW / bounds.width, viewportH / bounds.height);
-  return Math.min(cover, 1);
+  return Math.min(viewportW / bounds.width, viewportH / bounds.height, 1);
 }
 
 export interface SidebarLayout {
@@ -747,27 +765,32 @@ export interface SidebarLayout {
 
 const SIDEBAR_LAYOUT_TIERS: SidebarLayout[] = [
   { actionBtnH: 48, needRowH: 28, actionColumns: 1, actionGap: 6, fontScale: 1, focusBannerH: 52, headerBtnH: 32 },
-  { actionBtnH: 40, needRowH: 22, actionColumns: 1, actionGap: 5, fontScale: 0.9, focusBannerH: 46, headerBtnH: 32 },
-  { actionBtnH: 40, needRowH: 22, actionColumns: 2, actionGap: 5, fontScale: 0.85, focusBannerH: 44, headerBtnH: 30 },
-  { actionBtnH: 40, needRowH: 22, actionColumns: 2, actionGap: 4, fontScale: 0.85, focusBannerH: 40, headerBtnH: 30 },
+  { actionBtnH: 44, needRowH: 20, actionColumns: 1, actionGap: 4, fontScale: 0.92, focusBannerH: 44, headerBtnH: 32 },
+  { actionBtnH: 56, needRowH: 22, actionColumns: 2, actionGap: 5, fontScale: 0.88, focusBannerH: 44, headerBtnH: 32 },
+  { actionBtnH: 52, needRowH: 22, actionColumns: 2, actionGap: 5, fontScale: 0.88, focusBannerH: 44, headerBtnH: 32 },
+  { actionBtnH: 50, needRowH: 22, actionColumns: 2, actionGap: 4, fontScale: 0.85, focusBannerH: 40, headerBtnH: 32 },
+  { actionBtnH: 48, needRowH: 20, actionColumns: 2, actionGap: 3, fontScale: 0.82, focusBannerH: 36, headerBtnH: 32 },
 ];
 
 function estimateSidebarHeight(layout: SidebarLayout, actionCount: number, hasHorse: boolean): number {
-  const toggles = layout.headerBtnH + 12;
-  let total = 10 + layout.focusBannerH + 10 + 50 + 10 + 58 + toggles;
+  const statsH = Math.round(44 * layout.fontScale);
+  const clockH = 52;
+  const toggleH = layout.headerBtnH;
+  const toggles = toggleH + 12;
+  let total = 10 + layout.focusBannerH + 10 + statsH + 10 + clockH + toggles;
 
   if (hasHorse) {
-    const cardTop = 78;
+    const cardTop = layout.actionBtnH >= 40 ? 78 : 72;
     const needs = NEED_KEY_COUNT * layout.needRowH;
-    const context = 24;
+    const context = layout.actionBtnH >= 40 ? 24 : 20;
     const actionRows = layout.actionColumns === 1 ? actionCount : Math.ceil(actionCount / 2);
     const actions = actionRows * (layout.actionBtnH + layout.actionGap);
-    total += cardTop + needs + context + 12 + actions + 20;
+    total += cardTop + needs + context + 12 + actions + 16;
   } else {
-    total += 160;
+    total += 140;
   }
 
-  return total + 40;
+  return total + 36;
 }
 
 export function getSidebarLayout(
@@ -776,17 +799,30 @@ export function getSidebarLayout(
   hasHorse: boolean,
   safeTop = 0,
   safeBottom = 0,
+  sidebarWidth = 320,
 ): SidebarLayout {
   const available = screenH - safeTop - safeBottom;
-  for (const tier of SIDEBAR_LAYOUT_TIERS) {
+  const preferSingleColumn = sidebarWidth >= 265;
+  const tiers = preferSingleColumn
+    ? [
+        ...SIDEBAR_LAYOUT_TIERS.filter((tier) => tier.actionColumns === 1),
+        ...SIDEBAR_LAYOUT_TIERS.filter((tier) => tier.actionColumns === 2),
+      ]
+    : SIDEBAR_LAYOUT_TIERS;
+
+  for (const tier of tiers) {
     if (estimateSidebarHeight(tier, actionCount, hasHorse) <= available) {
       return tier;
     }
   }
-  return SIDEBAR_LAYOUT_TIERS[SIDEBAR_LAYOUT_TIERS.length - 1]!;
+  return tiers[tiers.length - 1]!;
 }
 
 export function getSidebarWidth(screenWidth: number, screenHeight?: number): number {
+  const shortSide = Math.min(screenWidth, screenHeight ?? screenWidth);
+  if (shortSide <= 820) {
+    return clamp(Math.floor(screenWidth * 0.3), 265, 300);
+  }
   if (screenHeight !== undefined && screenHeight > screenWidth) {
     return clamp(Math.floor(screenWidth * 0.28), 220, 280);
   }

@@ -25,9 +25,11 @@ import {
   getTimeLabel,
   getTimeUntilDawnMs,
   getWorldFitZoom,
+  getWorldBounds,
   isNight,
   loadGameState,
   saveGameState,
+  shouldShowKidsQueue,
   shouldShowAlertBubble,
   tickGameState,
 } from './state';
@@ -93,13 +95,13 @@ const BUILDING_RECTS = [
 
 function kidsKeepOutRect(padding = 44): { x: number; y: number; width: number; height: number } {
   const { x, y, count } = LESSON_QUEUE;
-  const right = x + (count - 1) * 28;
-  const top = y - 52 - padding;
+  const right = x + (count - 1) * 32;
+  const top = y - 56 - padding;
   return {
     x: x - padding,
     y: top,
     width: right - x + padding * 2,
-    height: 52 + padding * 2 + 20,
+    height: 56 + padding * 2 + 24,
   };
 }
 
@@ -138,6 +140,7 @@ export class RanchScene extends Phaser.Scene {
   private kidsContainer?: Phaser.GameObjects.Container;
   private frontKid?: Phaser.GameObjects.Container;
   private kidsLabel?: Phaser.GameObjects.Text;
+  private kidsCueActive = false;
   private nightOverlayAlpha = 0;
   private nextSaveAt = 0;
   private panelSnapshot = '';
@@ -205,6 +208,7 @@ export class RanchScene extends Phaser.Scene {
     this.updateNightOverlay(delta);
     this.updateClouds();
     this.updateKidsVisibility();
+    this.updateKidsLessonCue();
     this.updateHorseMovement(delta);
     this.updateHorseViews(time);
     this.updateSidebarDynamic();
@@ -317,17 +321,18 @@ export class RanchScene extends Phaser.Scene {
     const { x, y, count } = LESSON_QUEUE;
 
     for (let i = 0; i < count; i += 1) {
-      const kid = this.createKidFigure(x + i * 28, y + (i % 2) * 8, shirtColors[i % shirtColors.length]);
+      const kid = this.createKidFigure(x + i * 32, y + (i % 2) * 8, shirtColors[i % shirtColors.length]);
+      kid.setScale(1.35);
       this.kidsContainer.add(kid);
       if (i === 0) this.frontKid = kid;
     }
 
-    const label = this.add.text(x + ((count - 1) * 28) / 2, y - 32, t(this.state.language, 'studentsWaiting'), {
+    const label = this.add.text(x + ((count - 1) * 32) / 2, y - 36, t(this.state.language, 'studentsWaiting'), {
       fontFamily: 'monospace',
-      fontSize: '13px',
+      fontSize: '15px',
       color: '#fff7d2',
       stroke: '#2d402a',
-      strokeThickness: 3,
+      strokeThickness: 4,
     }).setOrigin(0.5);
     this.kidsContainer.add(label);
     this.kidsLabel = label;
@@ -351,20 +356,59 @@ export class RanchScene extends Phaser.Scene {
   }
 
   private updateKidsVisibility(): void {
-    this.kidsContainer?.setVisible(!isNight(this.state));
+    this.kidsContainer?.setVisible(shouldShowKidsQueue(this.state));
+  }
+
+  private updateKidsLessonCue(): void {
+    if (!this.frontKid || !this.kidsContainer?.visible) {
+      this.stopKidsLessonCue();
+      return;
+    }
+
+    const wantsLesson =
+      this.state.focusCooldownMs <= 0 &&
+      this.state.focus?.kind === 'suggestLesson' &&
+      shouldShowKidsQueue(this.state);
+
+    if (wantsLesson && !this.kidsCueActive) {
+      this.kidsCueActive = true;
+      const baseY = this.frontKid.y;
+      this.tweens.add({
+        targets: this.frontKid,
+        y: baseY - 14,
+        duration: 420,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+      this.kidsLabel?.setColor('#fff0a8');
+    } else if (!wantsLesson) {
+      this.stopKidsLessonCue();
+    }
+  }
+
+  private stopKidsLessonCue(): void {
+    if (!this.kidsCueActive || !this.frontKid) return;
+    this.kidsCueActive = false;
+    this.tweens.killTweensOf(this.frontKid);
+    this.frontKid.y = LESSON_QUEUE.y;
+    this.kidsLabel?.setColor('#fff7d2');
   }
 
   private bounceFrontKid(): void {
     if (!this.frontKid) return;
     this.tweens.killTweensOf(this.frontKid);
-    this.frontKid.y = LESSON_QUEUE.y;
+    this.kidsCueActive = false;
+    const baseY = LESSON_QUEUE.y;
+    this.frontKid.y = baseY;
     this.tweens.add({
       targets: this.frontKid,
-      y: LESSON_QUEUE.y - 12,
+      y: baseY - 12,
       duration: 180,
       yoyo: true,
       repeat: 1,
       ease: 'Sine.easeOut',
+      onComplete: () => this.updateKidsLessonCue(),
     });
   }
 
@@ -886,7 +930,7 @@ export class RanchScene extends Phaser.Scene {
     const safeBottom = this.getSafeBottom();
     const x = this.scale.width - sw;
     const horse = this.getSelectedHorse();
-    this.sidebarLayout = getSidebarLayout(sh, this.countSidebarActions(horse), Boolean(horse), safeTop, safeBottom);
+    this.sidebarLayout = getSidebarLayout(sh, this.countSidebarActions(horse), Boolean(horse), safeTop, safeBottom, sw);
     const layout = this.sidebarLayout;
 
     const bg = this.add.rectangle(x, 0, sw, sh, 0x2a4528, 0.97).setOrigin(0);
@@ -927,23 +971,33 @@ export class RanchScene extends Phaser.Scene {
     y += 58;
 
     const btnY = y;
-    const toggleW = 44;
-    const btnH = layout.headerBtnH;
-    this.musicButtonHit = { x: x + 14, y: btnY, width: toggleW, height: btnH };
-    this.sidebar.add(this.createToggleButton(x + 14, btnY, toggleW, btnH, t(this.state.language, 'musicBtn'), !audio.isMusicMuted(), 0x7ebf62));
-    this.sfxButtonHit = { x: x + 62, y: btnY, width: toggleW, height: btnH };
-    this.sidebar.add(this.createToggleButton(x + 62, btnY, toggleW, btnH, t(this.state.language, 'sfxBtn'), !audio.isSfxMuted(), 0x56abc8));
+    const headerBtnH = 32;
+    const headerGap = 4;
+    const headerCount = 6;
+    const headerBtnW = Math.floor((sw - 28 - headerGap * (headerCount - 1)) / headerCount);
+
+    const placeHeaderBtn = (index: number, label: string, active: boolean, alpha = 1) => {
+      const bx = x + 14 + index * (headerBtnW + headerGap);
+      const button = this.createSmallButton(bx, btnY, headerBtnW, headerBtnH, label, active);
+      button.setAlpha(alpha);
+      this.sidebar.add(button);
+      return bx;
+    };
+
+    const musicActive = !audio.isMusicMuted();
+    const musicX = placeHeaderBtn(0, t(this.state.language, 'musicBtn'), false, musicActive ? 1 : 0.55);
+    this.musicButtonHit = { x: musicX, y: btnY, width: headerBtnW, height: headerBtnH };
+
+    const sfxActive = !audio.isSfxMuted();
+    const sfxX = placeHeaderBtn(1, t(this.state.language, 'sfxBtn'), false, sfxActive ? 1 : 0.55);
+    this.sfxButtonHit = { x: sfxX, y: btnY, width: headerBtnW, height: headerBtnH };
 
     const codes: Language[] = ['eu', 'de', 'es', 'en'];
-    const langBtnW = Math.min(44, Math.max(36, Math.floor((sw - 120) / codes.length)));
-    const langStep = langBtnW + 6;
     codes.forEach((language, index) => {
-      const bx = x + sw - 14 - (codes.length - index) * langStep;
-      const button = this.createSmallButton(bx, btnY, langBtnW, btnH, language.toUpperCase(), language === this.state.language);
-      this.sidebar.add(button);
-      this.languageButtonHits.push({ language, x: bx, y: btnY, width: langBtnW, height: btnH });
+      const bx = placeHeaderBtn(index + 2, language.toUpperCase(), language === this.state.language);
+      this.languageButtonHits.push({ language, x: bx, y: btnY, width: headerBtnW, height: headerBtnH });
     });
-    y += btnH + 12;
+    y += headerBtnH + 12;
 
     if (horse) {
       y = this.renderHorseCard(x, y, sw, horse);
@@ -951,7 +1005,7 @@ export class RanchScene extends Phaser.Scene {
       y = this.renderEmptyState(x, y, sw);
     }
 
-    this.messageText = this.add.text(x + sw / 2, sh - safeBottom - 28, '', {
+    this.messageText = this.add.text(x + sw / 2, sh - safeBottom - 22, '', {
       fontFamily: 'monospace',
       fontSize: this.sidebarFont(13),
       fontStyle: 'bold',
@@ -1053,31 +1107,52 @@ export class RanchScene extends Phaser.Scene {
 
     const cols = layout.actionColumns;
     const gap = layout.actionGap;
-    const btnH = layout.actionBtnH;
     const usableW = sw - 28;
     const btnW = cols === 2 ? (usableW - gap) / 2 : usableW;
+    const btnH = Math.max(btnW < 175 ? 52 : 48, layout.actionBtnH);
     let ay = cardH + y - y + 12;
+    const actionRows = Math.ceil(allActions.length / cols);
+    const rowHeights: number[] = [];
+    const pendingButtons: {
+      container: Phaser.GameObjects.Container;
+      action: ActionDefinition;
+      horse: Horse | undefined;
+      ax: number;
+      row: number;
+      height: number;
+    }[] = [];
 
     allActions.forEach((action, index) => {
       const col = index % cols;
       const row = Math.floor(index / cols);
       const ax = x + 14 + col * (btnW + gap);
-      const rowY = ay + row * (btnH + gap);
-      const button = this.createActionButton(action, horse, ax, rowY, btnW, btnH);
-      this.sidebar.add(button);
-      this.actionButtonHits.push({
-        action,
-        horse,
-        x: ax,
-        y: rowY,
-        width: btnW,
-        height: btnH,
-        container: button,
-      });
+      const { container, height: btnHeight } = this.createActionButton(action, horse, ax, 0, btnW, btnH);
+      this.sidebar.add(container);
+      rowHeights[row] = Math.max(rowHeights[row] ?? 0, btnHeight);
+      pendingButtons.push({ container, action, horse, ax, row, height: btnHeight });
     });
 
-    const actionRows = Math.ceil(allActions.length / cols);
-    return ay + actionRows * (btnH + gap);
+    let rowY = ay;
+    for (let row = 0; row < actionRows; row++) {
+      const h = rowHeights[row] ?? btnH;
+      pendingButtons
+        .filter((p) => p.row === row)
+        .forEach((p) => {
+          p.container.setY(rowY);
+          this.actionButtonHits.push({
+            action: p.action,
+            horse: p.horse,
+            x: p.ax,
+            y: rowY,
+            width: btnW,
+            height: p.height,
+            container: p.container,
+          });
+        });
+      rowY += h + gap;
+    }
+
+    return rowY;
   }
 
   private renderEmptyState(x: number, y: number, sw: number): number {
@@ -1107,11 +1182,11 @@ export class RanchScene extends Phaser.Scene {
 
     const expand = actions.find((a) => a.id === 'expandStable');
     if (expand) {
-      const btnH = this.sidebarLayout.actionBtnH;
-      const button = this.createActionButton(expand, undefined, x + 14, y + 100, sw - 28, btnH);
+      const btnH = 48;
+      const { container: button, height: actualH } = this.createActionButton(expand, undefined, x + 14, y + 100, sw - 28, btnH);
       this.sidebar.add(button);
-      this.actionButtonHits.push({ action: expand, x: x + 14, y: y + 100, width: sw - 28, height: btnH });
-      return y + 100 + btnH + 12;
+      this.actionButtonHits.push({ action: expand, x: x + 14, y: y + 100, width: sw - 28, height: actualH });
+      return y + 100 + actualH + 12;
     }
     return y + 100;
   }
@@ -1164,28 +1239,6 @@ export class RanchScene extends Phaser.Scene {
     this.sidebar.add(eventText);
   }
 
-  private createToggleButton(
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    label: string,
-    on: boolean,
-    color: number,
-  ): Phaser.GameObjects.Container {
-    const container = this.add.container(x, y);
-    const bg = this.add.rectangle(0, 0, width, height, on ? color : 0x547546, 1).setOrigin(0);
-    bg.setStrokeStyle(2, on ? 0xfff5bd : 0xbfd494);
-    const text = this.add.text(width / 2, height / 2, label, {
-      fontFamily: 'monospace',
-      fontSize: this.sidebarFont(16),
-      fontStyle: 'bold',
-      color: on ? '#3c2b16' : '#fff5cb',
-    }).setOrigin(0.5);
-    container.add([bg, text]);
-    return container;
-  }
-
   private createSmallButton(
     x: number,
     y: number,
@@ -1197,9 +1250,10 @@ export class RanchScene extends Phaser.Scene {
     const container = this.add.container(x, y);
     const bg = this.add.rectangle(0, 0, width, height, active ? 0xf6cf72 : 0x547546, 1).setOrigin(0);
     bg.setStrokeStyle(2, active ? 0xfff5bd : 0xbfd494);
+    const fontSize = width < 36 ? '11px' : '13px';
     const text = this.add.text(width / 2, height / 2, label, {
       fontFamily: 'monospace',
-      fontSize: this.sidebarFont(13),
+      fontSize,
       fontStyle: 'bold',
       color: active ? '#3c2b16' : '#fff5cb',
     }).setOrigin(0.5);
@@ -1214,33 +1268,46 @@ export class RanchScene extends Phaser.Scene {
     y: number,
     width: number,
     height: number,
-  ): Phaser.GameObjects.Container {
+  ): { container: Phaser.GameObjects.Container; height: number } {
     const disabledReason = action.canUse(this.state, horse);
     const enabled = disabledReason === null;
+    const narrow = width < 175;
+    const textW = Math.max(48, width - 48);
+    const minH = Math.max(height, narrow ? 52 : 48);
+
     const container = this.add.container(x, y);
-    const bg = this.add.rectangle(0, 0, width, height, enabled ? 0xfff7d6 : 0xb8b1a0, 1).setOrigin(0);
+    const bg = this.add.rectangle(0, 0, width, minH, enabled ? 0xfff7d6 : 0xb8b1a0, 1).setOrigin(0);
     bg.setStrokeStyle(2, enabled ? 0xb47a38 : 0x8a8171);
-    const icon = this.add.image(20, height / 2, action.iconKey).setScale(this.sidebarLayout.actionBtnH < 44 ? 0.75 : 0.9);
-    const label = this.add.text(42, height < 44 ? 6 : 8, t(this.state.language, action.labelKey), {
+
+    const label = this.add.text(42, 7, t(this.state.language, action.labelKey), {
       fontFamily: 'monospace',
-      fontSize: this.sidebarFont(13),
+      fontSize: narrow ? '12px' : '13px',
       fontStyle: 'bold',
       color: enabled ? '#4a2f1b' : '#6f675d',
+      wordWrap: { width: textW, useAdvancedWrap: true },
+      lineSpacing: -2,
     });
+
     const cost = action.getCost(this.state, horse);
     const reward = action.getReward?.(this.state, horse) ?? 0;
     const costText = reward > 0 ? `+${reward} ${t(this.state.language, 'coinsShort')}` : cost > 0 ? `-${cost} ${t(this.state.language, 'coinsShort')}` : '';
-    const detail = disabledReason ? t(this.state.language, disabledReason) : `${t(this.state.language, action.benefitKey)} ${costText}`;
-    const detailY = height < 44 ? 22 : 28;
-    const detailText = this.add.text(42, detailY, detail.trim(), {
+    const detailRaw = disabledReason ? t(this.state.language, disabledReason) : `${t(this.state.language, action.benefitKey)} ${costText}`.trim();
+    const detailText = this.add.text(42, 7 + label.height + 2, detailRaw, {
       fontFamily: 'monospace',
-      fontSize: this.sidebarFont(10),
+      fontSize: '10px',
       color: enabled ? '#6a4a2b' : '#756e65',
+      wordWrap: { width: textW, useAdvancedWrap: true },
+      lineSpacing: -2,
     });
-    detailText.setCrop(0, 0, Math.max(50, width - 48), height < 44 ? 14 : 16);
+
+    const btnH = Math.ceil(7 + label.height + 2 + detailText.height + 8);
+    const finalH = Math.max(minH, btnH);
+    bg.setSize(width, finalH);
+    const icon = this.add.image(20, finalH / 2, action.iconKey).setScale(narrow ? 0.8 : 0.9);
+
     container.add([bg, icon, label, detailText]);
     container.setAlpha(enabled ? 1 : 0.72);
-    return container;
+    return { container, height: finalH };
   }
 
   private getStatsLine(): string {
@@ -1896,10 +1963,11 @@ export class RanchScene extends Phaser.Scene {
   private fitWorldCamera(): void {
     const worldW = this.getWorldViewportWidth();
     const height = this.scale.height;
+    const bounds = getWorldBounds();
     this.worldZoom = getWorldFitZoom(worldW, height);
     const cam = this.cameras.main;
     cam.setZoom(this.worldZoom);
-    cam.centerOn(PADDOCK.x + PADDOCK.width / 2, PADDOCK.y + PADDOCK.height / 2 - 40);
+    cam.centerOn(bounds.centerX, bounds.centerY);
   }
 
   private handleResize(): void {
