@@ -1,0 +1,19 @@
+{
+  "name": "horse-stable",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "playlist": "node scripts/generate-playlist.mjs",
+    "dev": "npm run playlist && vite --host 0.0.0.0",
+    "build": "npm run playlist && tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}
