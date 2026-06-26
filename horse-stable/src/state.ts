@@ -19,6 +19,9 @@ export const CYCLE_MS = DAYLIGHT_MS + NIGHT_MS;
 export const LESSON_DURATION_MS = 25_000;
 export const LESSON_RING = { x: 200, y: 480 };
 export const WORLD_SIZE = { width: 1600, height: 1000 };
+export const LAND_PAD_X = 360;
+export const LAND_PAD_BOTTOM = 320;
+export const NEED_KEY_COUNT = 4;
 export const PADDOCK = { x: 170, y: 350, width: 980, height: 520 };
 export const LESSON_QUEUE = { x: 52, y: 620, count: 4 };
 
@@ -721,6 +724,69 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-export function getSidebarWidth(screenWidth: number): number {
+export function getWorldBounds(): { width: number; height: number } {
+  return { width: WORLD_SIZE.width + LAND_PAD_X * 2, height: WORLD_SIZE.height + LAND_PAD_BOTTOM };
+}
+
+export function getWorldFitZoom(viewportW: number, viewportH: number): number {
+  const bounds = getWorldBounds();
+  return Math.min(viewportW / bounds.width, viewportH / bounds.height, 1);
+}
+
+export interface SidebarLayout {
+  actionBtnH: number;
+  needRowH: number;
+  actionColumns: 1 | 2;
+  actionGap: number;
+  fontScale: number;
+  focusBannerH: number;
+  headerBtnH: number;
+}
+
+const SIDEBAR_LAYOUT_TIERS: SidebarLayout[] = [
+  { actionBtnH: 48, needRowH: 28, actionColumns: 1, actionGap: 6, fontScale: 1, focusBannerH: 52, headerBtnH: 32 },
+  { actionBtnH: 40, needRowH: 22, actionColumns: 1, actionGap: 5, fontScale: 0.9, focusBannerH: 46, headerBtnH: 32 },
+  { actionBtnH: 40, needRowH: 22, actionColumns: 2, actionGap: 5, fontScale: 0.85, focusBannerH: 44, headerBtnH: 30 },
+  { actionBtnH: 40, needRowH: 22, actionColumns: 2, actionGap: 4, fontScale: 0.85, focusBannerH: 40, headerBtnH: 30 },
+];
+
+function estimateSidebarHeight(layout: SidebarLayout, actionCount: number, hasHorse: boolean): number {
+  const toggles = layout.headerBtnH + 12;
+  let total = 10 + layout.focusBannerH + 10 + 50 + 10 + 58 + toggles;
+
+  if (hasHorse) {
+    const cardTop = 78;
+    const needs = NEED_KEY_COUNT * layout.needRowH;
+    const context = 24;
+    const actionRows = layout.actionColumns === 1 ? actionCount : Math.ceil(actionCount / 2);
+    const actions = actionRows * (layout.actionBtnH + layout.actionGap);
+    total += cardTop + needs + context + 12 + actions + 20;
+  } else {
+    total += 160;
+  }
+
+  return total + 40;
+}
+
+export function getSidebarLayout(
+  screenH: number,
+  actionCount: number,
+  hasHorse: boolean,
+  safeTop = 0,
+  safeBottom = 0,
+): SidebarLayout {
+  const available = screenH - safeTop - safeBottom;
+  for (const tier of SIDEBAR_LAYOUT_TIERS) {
+    if (estimateSidebarHeight(tier, actionCount, hasHorse) <= available) {
+      return tier;
+    }
+  }
+  return SIDEBAR_LAYOUT_TIERS[SIDEBAR_LAYOUT_TIERS.length - 1]!;
+}
+
+export function getSidebarWidth(screenWidth: number, screenHeight?: number): number {
+  if (screenHeight !== undefined && screenHeight > screenWidth) {
+    return clamp(Math.floor(screenWidth * 0.3), 240, 300);
+  }
   return clamp(Math.floor(screenWidth * 0.34), 280, 360);
 }

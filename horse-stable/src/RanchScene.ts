@@ -5,6 +5,8 @@ import { needKeys, t } from './i18n';
 import {
   CYCLE_MS,
   DAYLIGHT_MS,
+  LAND_PAD_BOTTOM,
+  LAND_PAD_X,
   LESSONS_PER_ADULT_PER_DAY,
   LESSON_QUEUE,
   LESSON_RING,
@@ -18,9 +20,11 @@ import {
   getGrowthProgress,
   getLessonsLeft,
   getShortestLessonRemainingMs,
+  getSidebarLayout,
   getSidebarWidth,
   getTimeLabel,
   getTimeUntilDawnMs,
+  getWorldFitZoom,
   isNight,
   loadGameState,
   saveGameState,
@@ -28,6 +32,7 @@ import {
   tickGameState,
 } from './state';
 import type { ActionDefinition, ActionId, GameState, Horse, HorseColor, Language, NeedKey } from './types';
+import type { SidebarLayout } from './state';
 
 interface HorseView {
   container: Phaser.GameObjects.Container;
@@ -101,8 +106,6 @@ function kidsKeepOutRect(padding = 44): { x: number; y: number; width: number; h
 const SKY_COLOR = 0x87ceeb;
 const SKY_COLOR_CSS = '#87ceeb';
 const SKY_HEIGHT = 148;
-const LAND_PAD_X = 360;
-const LAND_PAD_BOTTOM = 320;
 const PLANT_OUTSIDE_PAD = 56;
 
 const POND = { x: 1310, y: 650, rx: 115, ry: 59 };
@@ -117,6 +120,8 @@ export class RanchScene extends Phaser.Scene {
   private uiRoot!: Phaser.GameObjects.Container;
   private uiCamera!: Phaser.Cameras.Scene2D.Camera;
   private sidebarWidth = 320;
+  private worldZoom = 1;
+  private sidebarLayout!: SidebarLayout;
   private horseViews = new Map<string, HorseView>();
   private selectedHorseId?: string;
   private sidebar!: Phaser.GameObjects.Container;
@@ -183,7 +188,7 @@ export class RanchScene extends Phaser.Scene {
 
     this.scale.on('resize', this.handleResize, this);
     this.handleResize();
-    this.cameras.main.centerOn(690, 555);
+    this.fitWorldCamera();
   }
 
   update(time: number, delta: number): void {
@@ -850,6 +855,21 @@ export class RanchScene extends Phaser.Scene {
     this.renderSidebarContent();
   }
 
+  private sidebarFont(size: number): string {
+    return `${Math.max(9, Math.round(size * this.sidebarLayout.fontScale))}px`;
+  }
+
+  private countSidebarActions(horse?: Horse): number {
+    if (!horse) {
+      return actions.some((a) => a.id === 'expandStable') ? 1 : 0;
+    }
+    const stageActions = actionsForStage(horse.ageStage);
+    const expandAction = actions.find((a) => a.id === 'expandStable');
+    const allActions =
+      expandAction && !stageActions.includes(expandAction) ? [...stageActions, expandAction] : stageActions;
+    return allActions.length;
+  }
+
   private renderSidebarContent(): void {
     this.sidebar.removeAll(true);
     this.actionButtonHits = [];
@@ -866,6 +886,9 @@ export class RanchScene extends Phaser.Scene {
     const safeTop = this.getSafeTop();
     const safeBottom = this.getSafeBottom();
     const x = this.scale.width - sw;
+    const horse = this.getSelectedHorse();
+    this.sidebarLayout = getSidebarLayout(sh, this.countSidebarActions(horse), Boolean(horse), safeTop, safeBottom);
+    const layout = this.sidebarLayout;
 
     const bg = this.add.rectangle(x, 0, sw, sh, 0x2a4528, 0.97).setOrigin(0);
     bg.setStrokeStyle(4, 0x1a2e18);
@@ -873,13 +896,13 @@ export class RanchScene extends Phaser.Scene {
 
     let y = safeTop + 10;
 
-    const focusBg = this.add.rectangle(x + 12, y, sw - 24, 52, 0xf6cf72, 0.95).setOrigin(0);
+    const focusBg = this.add.rectangle(x + 12, y, sw - 24, layout.focusBannerH, 0xf6cf72, 0.95).setOrigin(0);
     focusBg.setStrokeStyle(2, 0xb47a38);
     focusBg.setName('focusBg');
     this.sidebar.add(focusBg);
-    const focusText = this.add.text(x + sw / 2, y + 26, this.getFocusBannerText(), {
+    const focusText = this.add.text(x + sw / 2, y + layout.focusBannerH / 2, this.getFocusBannerText(), {
       fontFamily: 'monospace',
-      fontSize: sw < 300 ? '12px' : '14px',
+      fontSize: this.sidebarFont(sw < 300 ? 12 : 14),
       fontStyle: 'bold',
       color: '#4a2f1b',
       align: 'center',
@@ -887,12 +910,12 @@ export class RanchScene extends Phaser.Scene {
     }).setOrigin(0.5);
     focusText.setName('focusText');
     this.sidebar.add(focusText);
-    this.focusBannerHit = { x: x + 12, y, width: sw - 24, height: 52 };
-    y += 62;
+    this.focusBannerHit = { x: x + 12, y, width: sw - 24, height: layout.focusBannerH };
+    y += layout.focusBannerH + 10;
 
     const stats = this.add.text(x + 14, y, this.getStatsLine(), {
       fontFamily: 'monospace',
-      fontSize: '13px',
+      fontSize: this.sidebarFont(13),
       color: '#f6edcf',
       lineSpacing: 4,
     });
@@ -905,23 +928,24 @@ export class RanchScene extends Phaser.Scene {
     y += 58;
 
     const btnY = y;
-    const btnW = 44;
-    const btnH = 32;
-    this.musicButtonHit = { x: x + 14, y: btnY, width: btnW, height: btnH };
-    this.sidebar.add(this.createToggleButton(x + 14, btnY, btnW, btnH, t(this.state.language, 'musicBtn'), !audio.isMusicMuted(), 0x7ebf62));
-    this.sfxButtonHit = { x: x + 62, y: btnY, width: btnW, height: btnH };
-    this.sidebar.add(this.createToggleButton(x + 62, btnY, btnW, btnH, t(this.state.language, 'sfxBtn'), !audio.isSfxMuted(), 0x56abc8));
+    const toggleW = 44;
+    const btnH = layout.headerBtnH;
+    this.musicButtonHit = { x: x + 14, y: btnY, width: toggleW, height: btnH };
+    this.sidebar.add(this.createToggleButton(x + 14, btnY, toggleW, btnH, t(this.state.language, 'musicBtn'), !audio.isMusicMuted(), 0x7ebf62));
+    this.sfxButtonHit = { x: x + 62, y: btnY, width: toggleW, height: btnH };
+    this.sidebar.add(this.createToggleButton(x + 62, btnY, toggleW, btnH, t(this.state.language, 'sfxBtn'), !audio.isSfxMuted(), 0x56abc8));
 
     const codes: Language[] = ['eu', 'de', 'es', 'en'];
+    const langBtnW = Math.min(44, Math.max(36, Math.floor((sw - 120) / codes.length)));
+    const langStep = langBtnW + 6;
     codes.forEach((language, index) => {
-      const bx = x + sw - 14 - (codes.length - index) * 50;
-      const button = this.createSmallButton(bx, btnY, 44, btnH, language.toUpperCase(), language === this.state.language);
+      const bx = x + sw - 14 - (codes.length - index) * langStep;
+      const button = this.createSmallButton(bx, btnY, langBtnW, btnH, language.toUpperCase(), language === this.state.language);
       this.sidebar.add(button);
-      this.languageButtonHits.push({ language, x: bx, y: btnY, width: 44, height: btnH });
+      this.languageButtonHits.push({ language, x: bx, y: btnY, width: langBtnW, height: btnH });
     });
-    y += 44;
+    y += btnH + 12;
 
-    const horse = this.getSelectedHorse();
     if (horse) {
       y = this.renderHorseCard(x, y, sw, horse);
     } else {
@@ -930,7 +954,7 @@ export class RanchScene extends Phaser.Scene {
 
     this.messageText = this.add.text(x + sw / 2, sh - safeBottom - 28, '', {
       fontFamily: 'monospace',
-      fontSize: '13px',
+      fontSize: this.sidebarFont(13),
       fontStyle: 'bold',
       color: '#fff8c4',
       stroke: '#28402a',
@@ -942,6 +966,7 @@ export class RanchScene extends Phaser.Scene {
   }
 
   private renderHorseCard(x: number, y: number, sw: number, horse: Horse): number {
+    const layout = this.sidebarLayout;
     const cardBg = this.add.rectangle(x + 12, y, sw - 24, 0, 0xf7e8bd, 0.96).setOrigin(0);
     cardBg.setStrokeStyle(3, 0x7e5a33);
     this.sidebar.add(cardBg);
@@ -951,7 +976,7 @@ export class RanchScene extends Phaser.Scene {
 
     const header = this.add.text(x + 68, y + 10, `${horse.name}`, {
       fontFamily: 'monospace',
-      fontSize: '17px',
+      fontSize: this.sidebarFont(17),
       fontStyle: 'bold',
       color: '#4f321d',
     });
@@ -959,14 +984,14 @@ export class RanchScene extends Phaser.Scene {
 
     const stage = this.add.text(x + 68, y + 32, t(this.state.language, horse.ageStage), {
       fontFamily: 'monospace',
-      fontSize: '12px',
+      fontSize: this.sidebarFont(12),
       color: '#5c472b',
     });
     this.sidebar.add(stage);
 
     const valueLine = this.add.text(x + 68, y + 50, `${t(this.state.language, 'value')}: ${horse.value}`, {
       fontFamily: 'monospace',
-      fontSize: '12px',
+      fontSize: this.sidebarFont(12),
       color: '#5c472b',
     });
     this.sidebar.add(valueLine);
@@ -977,7 +1002,7 @@ export class RanchScene extends Phaser.Scene {
     const labels: Phaser.GameObjects.Text[] = [];
     const pulses: Phaser.GameObjects.Rectangle[] = [];
     needKeys.forEach((need, index) => {
-      const by = y + 78 + index * 28;
+      const by = y + 78 + index * layout.needRowH;
       const pulse = this.add.rectangle(x + 22, by + 10, barW + 4, 22, 0xfff8c4, 0).setOrigin(0);
       pulse.setStrokeStyle(2, 0xffd45a, 0);
       pulses.push(pulse);
@@ -985,7 +1010,7 @@ export class RanchScene extends Phaser.Scene {
 
       const label = this.add.text(x + 24, by, t(this.state.language, need), {
         fontFamily: 'monospace',
-        fontSize: '11px',
+        fontSize: this.sidebarFont(11),
         color: '#604326',
       });
       labels.push(label);
@@ -996,7 +1021,7 @@ export class RanchScene extends Phaser.Scene {
       const fill = this.add.rectangle(x + 24, by + 14, barW * (displayed / 100), 8, barColors[need], 1).setOrigin(0);
       fills.push(fill);
       this.sidebar.add(fill);
-      cardH = by + 28;
+      cardH = by + layout.needRowH;
     });
     this.needBarFills.set(horse.id, fills);
     this.needBarLabels.set(horse.id, labels);
@@ -1016,7 +1041,7 @@ export class RanchScene extends Phaser.Scene {
     }
     this.sidebar.add(this.add.text(x + 24, contextY, contextLabel, {
       fontFamily: 'monospace',
-      fontSize: '11px',
+      fontSize: this.sidebarFont(11),
       color: '#604326',
     }));
     cardH = contextY + 24;
@@ -1027,24 +1052,33 @@ export class RanchScene extends Phaser.Scene {
     const expandAction = actions.find((a) => a.id === 'expandStable');
     const allActions = expandAction && !stageActions.includes(expandAction) ? [...stageActions, expandAction] : stageActions;
 
+    const cols = layout.actionColumns;
+    const gap = layout.actionGap;
+    const btnH = layout.actionBtnH;
+    const usableW = sw - 28;
+    const btnW = cols === 2 ? (usableW - gap) / 2 : usableW;
     let ay = cardH + y - y + 12;
-    const btnH = 48;
-    for (const action of allActions) {
-      const button = this.createActionButton(action, horse, x + 14, ay, sw - 28, btnH);
+
+    allActions.forEach((action, index) => {
+      const col = index % cols;
+      const row = Math.floor(index / cols);
+      const ax = x + 14 + col * (btnW + gap);
+      const rowY = ay + row * (btnH + gap);
+      const button = this.createActionButton(action, horse, ax, rowY, btnW, btnH);
       this.sidebar.add(button);
       this.actionButtonHits.push({
         action,
         horse,
-        x: x + 14,
-        y: ay,
-        width: sw - 28,
+        x: ax,
+        y: rowY,
+        width: btnW,
         height: btnH,
         container: button,
       });
-      ay += btnH + 6;
-    }
+    });
 
-    return ay;
+    const actionRows = Math.ceil(allActions.length / cols);
+    return ay + actionRows * (btnH + gap);
   }
 
   private renderEmptyState(x: number, y: number, sw: number): number {
@@ -1056,7 +1090,7 @@ export class RanchScene extends Phaser.Scene {
       foals,
     }), {
       fontFamily: 'monospace',
-      fontSize: '14px',
+      fontSize: this.sidebarFont(14),
       color: '#e8dfc0',
       align: 'center',
       wordWrap: { width: sw - 28 },
@@ -1065,7 +1099,7 @@ export class RanchScene extends Phaser.Scene {
 
     const tip = this.add.text(x + sw / 2, y + 60, t(this.state.language, 'selectHorse'), {
       fontFamily: 'monospace',
-      fontSize: '13px',
+      fontSize: this.sidebarFont(13),
       color: '#c8e8a8',
       align: 'center',
       wordWrap: { width: sw - 28 },
@@ -1074,11 +1108,11 @@ export class RanchScene extends Phaser.Scene {
 
     const expand = actions.find((a) => a.id === 'expandStable');
     if (expand) {
-      const btnH = 48;
+      const btnH = this.sidebarLayout.actionBtnH;
       const button = this.createActionButton(expand, undefined, x + 14, y + 100, sw - 28, btnH);
       this.sidebar.add(button);
       this.actionButtonHits.push({ action: expand, x: x + 14, y: y + 100, width: sw - 28, height: btnH });
-      return y + 160;
+      return y + 100 + btnH + 12;
     }
     return y + 100;
   }
@@ -1145,7 +1179,7 @@ export class RanchScene extends Phaser.Scene {
     bg.setStrokeStyle(2, on ? 0xfff5bd : 0xbfd494);
     const text = this.add.text(width / 2, height / 2, label, {
       fontFamily: 'monospace',
-      fontSize: '16px',
+      fontSize: this.sidebarFont(16),
       fontStyle: 'bold',
       color: on ? '#3c2b16' : '#fff5cb',
     }).setOrigin(0.5);
@@ -1166,7 +1200,7 @@ export class RanchScene extends Phaser.Scene {
     bg.setStrokeStyle(2, active ? 0xfff5bd : 0xbfd494);
     const text = this.add.text(width / 2, height / 2, label, {
       fontFamily: 'monospace',
-      fontSize: '13px',
+      fontSize: this.sidebarFont(13),
       fontStyle: 'bold',
       color: active ? '#3c2b16' : '#fff5cb',
     }).setOrigin(0.5);
@@ -1187,10 +1221,10 @@ export class RanchScene extends Phaser.Scene {
     const container = this.add.container(x, y);
     const bg = this.add.rectangle(0, 0, width, height, enabled ? 0xfff7d6 : 0xb8b1a0, 1).setOrigin(0);
     bg.setStrokeStyle(2, enabled ? 0xb47a38 : 0x8a8171);
-    const icon = this.add.image(20, height / 2, action.iconKey).setScale(0.9);
-    const label = this.add.text(42, 8, t(this.state.language, action.labelKey), {
+    const icon = this.add.image(20, height / 2, action.iconKey).setScale(this.sidebarLayout.actionBtnH < 44 ? 0.75 : 0.9);
+    const label = this.add.text(42, height < 44 ? 6 : 8, t(this.state.language, action.labelKey), {
       fontFamily: 'monospace',
-      fontSize: '13px',
+      fontSize: this.sidebarFont(13),
       fontStyle: 'bold',
       color: enabled ? '#4a2f1b' : '#6f675d',
     });
@@ -1198,12 +1232,13 @@ export class RanchScene extends Phaser.Scene {
     const reward = action.getReward?.(this.state, horse) ?? 0;
     const costText = reward > 0 ? `+${reward} ${t(this.state.language, 'coinsShort')}` : cost > 0 ? `-${cost} ${t(this.state.language, 'coinsShort')}` : '';
     const detail = disabledReason ? t(this.state.language, disabledReason) : `${t(this.state.language, action.benefitKey)} ${costText}`;
-    const detailText = this.add.text(42, 28, detail.trim(), {
+    const detailY = height < 44 ? 22 : 28;
+    const detailText = this.add.text(42, detailY, detail.trim(), {
       fontFamily: 'monospace',
-      fontSize: '10px',
+      fontSize: this.sidebarFont(10),
       color: enabled ? '#6a4a2b' : '#756e65',
     });
-    detailText.setCrop(0, 0, Math.max(50, width - 48), 16);
+    detailText.setCrop(0, 0, Math.max(50, width - 48), height < 44 ? 14 : 16);
     container.add([bg, icon, label, detailText]);
     container.setAlpha(enabled ? 1 : 0.72);
     return container;
@@ -1427,8 +1462,8 @@ export class RanchScene extends Phaser.Scene {
         this.dragged = true;
       }
       if (this.dragged && !this.isPointerOverSidebar(pointer)) {
-        this.cameras.main.scrollX = this.dragStart.scrollX - dx;
-        this.cameras.main.scrollY = this.dragStart.scrollY - dy;
+        this.cameras.main.scrollX = this.dragStart.scrollX - dx / this.worldZoom;
+        this.cameras.main.scrollY = this.dragStart.scrollY - dy / this.worldZoom;
       }
     });
 
@@ -1537,13 +1572,16 @@ export class RanchScene extends Phaser.Scene {
   }
 
   private centerOnHorse(id: string): void {
+    if (this.worldZoom < 1) return;
     const horse = this.state.horses.find((h) => h.id === id);
     if (!horse) return;
     const worldW = this.getWorldViewportWidth();
+    const visibleW = worldW / this.worldZoom;
+    const visibleH = this.scale.height / this.worldZoom;
     this.tweens.add({
       targets: this.cameras.main,
-      scrollX: horse.position.x - worldW / 2,
-      scrollY: horse.position.y - this.scale.height / 2,
+      scrollX: horse.position.x - visibleW / 2,
+      scrollY: horse.position.y - visibleH / 2,
       duration: 600,
       ease: 'Sine.easeInOut',
     });
@@ -1856,8 +1894,17 @@ export class RanchScene extends Phaser.Scene {
     return this.scale.width - this.sidebarWidth;
   }
 
+  private fitWorldCamera(): void {
+    const worldW = this.getWorldViewportWidth();
+    const height = this.scale.height;
+    this.worldZoom = getWorldFitZoom(worldW, height);
+    const cam = this.cameras.main;
+    cam.setZoom(this.worldZoom);
+    cam.centerOn(WORLD_SIZE.width / 2, WORLD_SIZE.height / 2);
+  }
+
   private handleResize(): void {
-    this.sidebarWidth = getSidebarWidth(this.scale.width);
+    this.sidebarWidth = getSidebarWidth(this.scale.width, this.scale.height);
     const worldW = this.getWorldViewportWidth();
     const height = this.scale.height;
 
@@ -1870,6 +1917,7 @@ export class RanchScene extends Phaser.Scene {
       this.nightOverlay.setSize(worldW, height);
     }
     this.layoutStars();
+    this.fitWorldCamera();
     this.panelSnapshot = '';
     this.renderSidebarContent();
   }

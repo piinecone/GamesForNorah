@@ -22,4 +22,12 @@ const config: Phaser.Types.Core.GameConfig = {
   scene: [RanchScene],
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+
+const refreshScale = () => {
+  game.scale.refresh();
+};
+
+window.addEventListener('resize', refreshScale);
+window.visualViewport?.addEventListener('resize', refreshScale);
+window.visualViewport?.addEventListener('scroll', refreshScale);
